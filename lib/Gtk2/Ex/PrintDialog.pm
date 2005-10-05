@@ -1,4 +1,4 @@
-# $Id: PrintDialog.pm,v 1.4 2005/09/30 10:53:23 jodrell Exp $
+# $Id: PrintDialog.pm,v 1.11 2005/10/05 14:30:13 jodrell Exp $
 # Copyright (c) 2005 Gavin Brown. All rights reserved. This program is free
 # software; you can redistribute it and/or modify it under the same terms as
 # Perl itself.
@@ -6,18 +6,13 @@ package Gtk2::Ex::PrintDialog;
 use Carp;
 use File::Basename qw(basename dirname);
 use File::Temp qw(tmpnam);
+use File::Spec;
 use Gtk2;
-use Net::CUPS;
-use vars qw($VERSION $GETTEXT $LPR $PRINTCMD $PS2PDF $PDFCMD);
+use vars qw($VERSION $GETTEXT);
 use strict;
 
-our $VERSION	= '0.01';
+our $VERSION	= '0.02';
 our $GETTEXT	= 0;
-our $CUPS	= 0;
-our $LPR	= 'lpr';
-our $PRINTCMD	= which($LPR);
-our $PS2PDF	= 'ps2pdf';
-our $PDFCMD	= which($PS2PDF);
 
 BEGIN {
 	eval {
@@ -35,6 +30,9 @@ Glib::Type->register(
 
 sub INIT_INSTANCE {
 	my $self = shift;
+
+	$self->{backend} = $self->get_backend;
+
 	$self->add_buttons(
 		'gtk-cancel'		=> 'cancel',
 		#'gtk-print-preview'	=> 0, not implemented just yet
@@ -63,8 +61,8 @@ sub INIT_INSTANCE {
 
 	# populate the printer combo:
 	$self->{opt_printer_combo} = Gtk2::ComboBox->new_text;
-	my @printers = grep { defined } cupsGetPrinters();
-	# no printers, or cups not installed, fall through to the command mode:
+	my @printers = $self->backend->get_printers;
+	# no printers, fall through to the command mode:
 	if (scalar(@printers) < 1) {
 		$self->{opt_print_printer}->set_sensitive(undef);
 		$self->{opt_printer_combo}->set_sensitive(undef);
@@ -77,47 +75,47 @@ sub INIT_INSTANCE {
 	}
 
 
-	# if lpr isn't in $PATH, let the user enter another command:
 	$self->{opt_command_entry} = Gtk2::Entry->new;
-	$self->{opt_command_entry}->set_text(-x $PRINTCMD ? $PRINTCMD : $LPR);
+	$self->{opt_command_entry}->set_text($self->backend->get_default_print_command);
+	$self->{opt_print_file}->set_active(1) if (!-x $self->backend->get_default_print_command && !$self->{opt_print_printer}->get_active);
 
 
-	$self->{opt_pdf_entry}	= Gtk2::Entry->new;
-	$self->{opt_pdf_entry}->set_editable(0);
-	$self->{opt_pdf_entry}->set_text(sprintf('%s/output.pdf', Glib::get_home_dir));
+	$self->{opt_pdf_label} = Gtk2::Label->new;
+	$self->{opt_pdf_label}->set_selectable(1);
+	$self->{opt_pdf_label}->set_alignment(0, 0.5);
+	$self->{opt_pdf_label}->set_size_request(200, -1);
+	$self->{opt_pdf_label}->set_ellipsize('middle');
+	$self->{opt_pdf_label}->set_text(File::Spec->catfile($self->get_default_dir, _('output.pdf')));
 
-	$self->{pdf_entry_button} = Gtk2::Button->new;
-	$self->{pdf_entry_button}->add(Gtk2::HBox->new);
-	$self->{pdf_entry_button}->child->pack_start(Gtk2::Image->new_from_stock('gtk-save-as', 'button'), 0, 0, 0);
-	$self->{pdf_entry_button}->child->pack_start(Gtk2::Label->new_with_mnemonic(_('_Browse..')), 1, 1, 0);
-	$self->{pdf_entry_button}->signal_connect('clicked', sub { $self->choose_pdf_dialog });
+	$self->{pdf_label_button} = Gtk2::Button->new_from_stock('gtk-open');
+	$self->{pdf_label_button}->signal_connect('clicked', sub { $self->choose_pdf_dialog });
 
-	$self->{pdf_entry_box} = Gtk2::HBox->new;
-	$self->{pdf_entry_box}->set_spacing(6);
-	$self->{pdf_entry_box}->pack_start($self->{opt_pdf_entry}, 1, 1, 0);
-	$self->{pdf_entry_box}->pack_start($self->{pdf_entry_button}, 0, 0, 0);
+	$self->{pdf_label_box} = Gtk2::HBox->new;
+	$self->{pdf_label_box}->set_spacing(6);
+	$self->{pdf_label_box}->pack_start($self->{opt_pdf_label}, 1, 1, 0);
+	$self->{pdf_label_box}->pack_start($self->{pdf_label_button}, 0, 0, 0);
 
-	if (!-x $PDFCMD) {
+	if (!$self->backend->can_print_pdf) {
 		$self->{opt_print_pdf}->set_sensitive(undef);
-		$self->{opt_pdf_entry}->set_sensitive(undef);
-		$self->{pdf_entry_button}->set_sensitive(undef);
+		$self->{opt_pdf_label}->set_sensitive(undef);
+		$self->{pdf_label_button}->set_sensitive(undef);
 	}
 
 
-	$self->{opt_file_entry}	= Gtk2::Entry->new;
-	$self->{opt_file_entry}->set_editable(0);
-	$self->{opt_file_entry}->set_text(sprintf('%s/output.ps', Glib::get_home_dir));
+	$self->{opt_file_label}	= Gtk2::Label->new;
+	$self->{opt_file_label}->set_selectable(1);
+	$self->{opt_file_label}->set_alignment(0, 0.5);
+	$self->{opt_file_label}->set_size_request(200, -1);
+	$self->{opt_file_label}->set_ellipsize('middle');
+	$self->{opt_file_label}->set_text(File::Spec->catfile($self->get_default_dir, _('output.ps')));
 
-	$self->{file_entry_button} = Gtk2::Button->new;
-	$self->{file_entry_button}->add(Gtk2::HBox->new);
-	$self->{file_entry_button}->child->pack_start(Gtk2::Image->new_from_stock('gtk-save-as', 'button'), 0, 0, 0);
-	$self->{file_entry_button}->child->pack_start(Gtk2::Label->new_with_mnemonic(_('_Browse..')), 1, 1, 0);
-	$self->{file_entry_button}->signal_connect('clicked', sub { $self->choose_file_dialog });
+	$self->{file_label_button} = Gtk2::Button->new_from_stock('gtk-open');
+	$self->{file_label_button}->signal_connect('clicked', sub { $self->choose_file_dialog });
 
-	$self->{file_entry_box} = Gtk2::HBox->new;
-	$self->{file_entry_box}->set_spacing(6);
-	$self->{file_entry_box}->pack_start($self->{opt_file_entry}, 1, 1, 0);
-	$self->{file_entry_box}->pack_start($self->{file_entry_button}, 0, 0, 0);
+	$self->{file_label_box} = Gtk2::HBox->new;
+	$self->{file_label_box}->set_spacing(6);
+	$self->{file_label_box}->pack_start($self->{opt_file_label}, 1, 1, 0);
+	$self->{file_label_box}->pack_start($self->{file_label_button}, 0, 0, 0);
 
 
 	$self->{opts_table} = Gtk2::Table->new(5, 2, 0);
@@ -131,10 +129,10 @@ sub INIT_INSTANCE {
 	$self->{opts_table}->attach($self->{opt_command_entry},	1, 2, 1, 2, 'fill', 'fill', 0, 0);
 
 	$self->{opts_table}->attach($self->{opt_print_pdf},	0, 1, 2, 3, 'fill', 'fill', 0, 0);
-	$self->{opts_table}->attach($self->{pdf_entry_box},	1, 2, 2, 3, 'fill', 'fill', 0, 0);
+	$self->{opts_table}->attach($self->{pdf_label_box},	1, 2, 2, 3, 'fill', 'fill', 0, 0);
 
 	$self->{opts_table}->attach($self->{opt_print_file},	0, 1, 3, 4, 'fill', 'fill', 0, 0);
-	$self->{opts_table}->attach($self->{file_entry_box},	1, 2, 3, 4, 'fill', 'fill', 0, 0);
+	$self->{opts_table}->attach($self->{file_label_box},	1, 2, 3, 4, 'fill', 'fill', 0, 0);
 
 	# these seems to be needed to fix the layout of the table...
 	my $label = Gtk2::Label->new;
@@ -169,10 +167,10 @@ sub choose_file_dialog {
 	$dialog->set_local_only(1);
 	$dialog->set_modal(1);
 	$dialog->set_icon_name('stock_print');
-	$dialog->set_current_folder(dirname($self->{opt_file_entry}->get_text));
-	$dialog->set_current_name(basename($self->{opt_file_entry}->get_text));
+	$dialog->set_current_folder(dirname($self->{opt_file_label}->get_text));
+	$dialog->set_current_name(basename($self->{opt_file_label}->get_text));
 	$dialog->signal_connect('response', sub {
-		$self->{opt_file_entry}->set_text($dialog->get_filename) if ($_[1] eq 'ok');
+		$self->{opt_file_label}->set_text($dialog->get_filename) if ($_[1] eq 'ok');
 		$dialog->destroy;
 	});
 	$dialog->run;
@@ -190,10 +188,10 @@ sub choose_pdf_dialog {
 	$dialog->set_local_only(1);
 	$dialog->set_modal(1);
 	$dialog->set_icon_name('stock_print');
-	$dialog->set_current_folder(dirname($self->{opt_pdf_entry}->get_text));
-	$dialog->set_current_name(basename($self->{opt_pdf_entry}->get_text));
+	$dialog->set_current_folder(dirname($self->{opt_pdf_label}->get_text));
+	$dialog->set_current_name(basename($self->{opt_pdf_label}->get_text));
 	$dialog->signal_connect('response', sub {
-		$self->{opt_file_entry}->set_text($dialog->get_filename) if ($_[1] eq 'ok');
+		$self->{opt_pdf_label}->set_text($dialog->get_filename) if ($_[1] eq 'ok');
 		$dialog->destroy;
 	});
 	$dialog->run;
@@ -263,7 +261,8 @@ sub print_to_printer {
 	print TMPFILE $self->get_data;
 	close(TMPFILE);
 
-	cupsPrintFile($self->{opt_printer_combo}->get_active_text, $filename, ref($self), {});
+	$self->backend->print_file($self->{opt_printer_combo}->get_active_text, $filename);
+
 	unlink($filename);
 
 	return 1;
@@ -271,21 +270,20 @@ sub print_to_printer {
 
 sub print_to_pdf {
 	my $self = shift;
-	my $cmd = sprintf('%s - "%s"', $PDFCMD, $self->{opt_pdf_entry}->get_text);
-	return $self->_print_to_command($cmd);
+	return $self->backend->print_to_pdf($self->get_data, $self->{opt_pdf_label}->get_text);
 }
 
 sub print_to_command {
 	my $self = shift;
-	return $self->_print_to_command($self->{opt_command_entry}->get_text);
+	return $self->_print_data_to_command($self->get_data, $self->{opt_command_entry}->get_text);
 }
 
-sub _print_to_command {
-	my ($self, $cmd) = @_;
+sub _print_data_to_command {
+	my ($self, $data, $cmd) = @_;
 
 	if (!open(CMD, "|$cmd")) {
 		my $dialog = Gtk2::MessageDialog->new(
-			$self,
+			undef,
 			'modal',
 			'error',
 			'ok',
@@ -296,7 +294,7 @@ sub _print_to_command {
 		$dialog->run;
 
 	} else {
-		print CMD $self->get_data;
+		print CMD $data;
 		close(CMD);
 		return 1;
 
@@ -306,7 +304,7 @@ sub _print_to_command {
 sub print_to_file {
 	my $self = shift;
 
-	my $file = $self->{opt_file_entry}->get_text;
+	my $file = $self->{opt_file_label}->get_text;
 	if (!open(DEST, ">$file")) {
 		my $dialog = Gtk2::MessageDialog->new(
 			$self,
@@ -358,6 +356,10 @@ sub get_data {
 	$_[0]->{data};
 }
 
+sub backend {
+	$_[0]->{backend};
+}
+
 sub _ {
 	my $text = shift;
 	return ($GETTEXT == 1 ? Locale::gettext::gettext($text) : $text);
@@ -366,13 +368,38 @@ sub _ {
 sub which {
 	my $cmd = shift;
 	foreach my $dir (split(/:/, $ENV{PATH})) {
-		my $path = sprintf('%s/%s', $dir, $cmd);
+		my $path = File::Spec->catfile($dir, $cmd);
 		return $path if (-x $path);
 	}
 	return undef;
 }
 
+sub get_backend {
+	my $self = shift;
+	my $module = sprintf('%s::%s', ref($self), ucfirst($^O));
+	my $file = $module.'.pm';
+	$file =~ s!::!/!g;
+	eval {
+		require "$file";
+	};
+	if ($@) {
+		carp(sprintf("Cannot find the %s backend!", $module));
+		return undef;
+
+	} else {
+		return $module->new;
+
+	}
+}
+
+sub get_default_dir {
+	my $self = shift;
+	return File::Spec->catfile(Glib::get_home_dir, ($^O eq 'MSWin32' ? 'Desktop' : ''));
+}
+
 1;
+
+__END__
 
 =pod
 
@@ -395,14 +422,21 @@ Gtk2::Ex::PrintDialog - a simple, pure Perl dialog for printing PostScript data 
 =head1 DESCRIPTION
 
 This module implements a dialog widget that can be used to print PostScript
-data on any CUPS-aware system. It is intended to be a lightweight and
-pure-perl alternative to the Gnome2::Print libraries.
+data. It is intended to be a lightweight and pure-perl alternative to the
+Gnome2::Print libraries.
+
+This module uses a simple system of operating-system specific backends that
+are used to do the job of printing. Currently, only a generic Linux/Unix
+backend (implemented using L<Net::CUPS>) is available, more will be added in
+the future.
 
 The dialog itself is intended to comply with the GNOME Human Interface
-Guidelines (HIG), and will gracefully fail if no printers have been installed,
-by providing an option to print to the C<lpr> command. If C<lpr> isn't
-installed either, the user can opt to print to another command, to a PDF file
-or to a PostScript file.
+Guidelines (HIG). It allows the user to print to any printer installed on the
+system, or to an external command such as C<lpr>, or to print a PostScript or
+PDF file.
+
+This module is UNSTABLE, the behaviour and API of its components may change in
+the future.
 
 =head1 OBJECT HIERARCHY
 
@@ -445,6 +479,45 @@ If the C<Locale::gettext> module is available on the system, and your
 application uses it, all the strings used in the dialog will be automagically
 translated, as long as these default values are translated in your .mo files.
 
+=head1 WRITING BACKENDS
+
+Backends are Perl modules with names of the form
+
+	C<Gtk2::Ex::PrintDialog::$^O>
+
+See L<perlvar> for details of the C<$^O> variable. The module must have the
+following methods:
+
+=over
+
+=item C<$backend = Gtk2::Ex::PrintDialog::$^O-E<gt>new>
+
+The constructor.
+
+=item C<$backend-E<gt>get_printers>
+
+Returns an array of printer names.
+
+=item C<$backend-E<gt>print_file($printer, $file)>
+
+Prints the contents of C<$file> to the printer named C<$file>
+
+=item C<$backend-E<gt>get_default_print_command>
+
+Returns the path to the default print command, if applicable (eg 'C<lpr>')
+
+=item C<$backend-E<gt>can_print_pdf>
+
+Returns a true value if PDF printing is supported, C<undef> otherwise.
+
+=item C<$backend-E<gt>print_to_pdf($data, $file)>
+
+Prints the PostScript data in C<$data> to the PDF file named C<$file>.
+
+Consult L<Gtk2::Ex::PrintDialog::Unix> for an example. Please note that this interface may change in the future.
+
+=back
+
 =head1 PREREQUISITES
 
 =over
@@ -453,7 +526,7 @@ translated, as long as these default values are translated in your .mo files.
 
 =item L<Locale::gettext> (recommended)
 
-=item L<Net::CUPS>
+=item L<Net::CUPS> (for the Unix/Linux backend)
 
 =item Ghostscript, for the C<ps2pdf> command (recommended)
 
@@ -461,13 +534,15 @@ translated, as long as these default values are translated in your .mo files.
 
 =head1 SEE ALSO
 
-L<Gnome2::Print>
+L<Gnome2::Print> provides Perl bindings to the "offical" GNOME printing library. If you want a simple way to generate PostScript data, consider L<PostScript::Simple>.
 
 =head1 TO DO
 
 =over
 
 =item Implement a "Print Preview" function, maybe using Poppler.
+
+=item More backends.
 
 =back
 
