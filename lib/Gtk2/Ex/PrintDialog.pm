@@ -1,4 +1,4 @@
-# $Id: PrintDialog.pm,v 1.11 2005/10/05 14:30:13 jodrell Exp $
+# $Id: PrintDialog.pm,v 1.12 2007/04/25 10:44:02 gavin Exp $
 # Copyright (c) 2005 Gavin Brown. All rights reserved. This program is free
 # software; you can redistribute it and/or modify it under the same terms as
 # Perl itself.
@@ -11,7 +11,7 @@ use Gtk2;
 use vars qw($VERSION $GETTEXT);
 use strict;
 
-our $VERSION	= '0.02';
+our $VERSION	= '0.03';
 our $GETTEXT	= 0;
 
 BEGIN {

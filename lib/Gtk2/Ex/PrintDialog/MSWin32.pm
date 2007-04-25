@@ -1,48 +1,41 @@
-# $Id: Unix.pm,v 1.5 2007/04/25 10:44:04 gavin Exp $
+# $Id: MSWin32.pm,v 1.1 2005/10/05 14:15:06 jodrell Exp $
 # Copyright (c) 2005 Gavin Brown. All rights reserved. This program is free
 # software; you can redistribute it and/or modify it under the same terms as
 # Perl itself.
-package Gtk2::Ex::PrintDialog::Unix;
-use Gtk2::Ex::PrintDialog;
-use Net::CUPS;
-use vars qw($LPR $PRINTCMD $PS2PDF $PDFCMD);
+package Gtk2::Ex::PrintDialog::MSWin32;
+use Win32::Printer;
+use Printer;
 use strict;
 
-our $LPR	= 'lpr';
-our $PRINTCMD	= Gtk2::Ex::PrintDialog::which($LPR);
-our $PS2PDF	= 'ps2pdf';
-our $PDFCMD	= Gtk2::Ex::PrintDialog::which($PS2PDF);
-
-
 sub new {
-	my $self = {};
-	$self->{cups} = Net::CUPS->new;
-	bless($self, shift);
+	my $self = bless({}, shift);
+	$self->{prn} = Printer->new;     
+	return $self;
 }
 
 sub get_printers {
 	my $self = shift;
-	return grep { defined } $self->{cups}->getDestinations;
+	use Data::Dumper;
+	my %data = $self->{prn}->list_printers;
+	return @{$data{name}};
 }
 
 sub print_file {
 	my ($self, $printer, $file) = @_;
-	$self->{cups}->getDestination($printer)->printFile($file, ref($self));
 }
 
 sub get_default_print_command {
 	my $self = shift;
-	return (-x $PRINTCMD ? $PRINTCMD : $LPR);
+	return '';
 }
 
 sub can_print_pdf {
-	return -x $PDFCMD;
+	return undef;
 }
 
 sub print_to_pdf {
 	my ($self, $data, $file) = @_;
-	my $cmd = sprintf('%s - "%s"', $PDFCMD, $file);
-	Gtk2::Ex::PrintDialog::_print_data_to_command(undef, $data, $cmd);
+	return undef;
 }
 
 1;
@@ -53,7 +46,7 @@ __END__
 
 =head1 NAME
 
-Gtk2::Ex::PrintDialog::Unix - generic Unix backend for L<Gtk2::Ex::PrintDialog>
+Gtk2::Ex::PrintDialog::MSWin32 - generic Windows backend for L<Gtk2::Ex::PrintDialog>
 
 =head1 DESCRIPTION
 
